@@ -13,6 +13,8 @@ class Config:
     
     # Gemini AI
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    # Зафиксированная модель Gemini (можно переопределить через переменные окружения)
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
     
     # Настройки голосов
     VOICES = {

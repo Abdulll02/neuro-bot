@@ -59,7 +59,6 @@ class Keyboards:
     def get_chat_actions():
         """Действия после ответа ИИ"""
         keyboard = [
-            [InlineKeyboardButton("🎤 Озвучить ответ", callback_data="voice_response")],
             [InlineKeyboardButton("📝 Продолжить диалог", callback_data="continue_chat")],
             [InlineKeyboardButton("🗑️ Новый диалог", callback_data="new_chat")],
             [InlineKeyboardButton("⬅️ Главная", callback_data="back_to_main")]
@@ -70,9 +69,8 @@ class Keyboards:
     def get_photo_actions():
         """Действия после анализа фото"""
         keyboard = [
-            [InlineKeyboardButton("🎤 Озвучить результат", callback_data="voice_photo_result")],
             [InlineKeyboardButton("📷 Новое фото", callback_data="new_photo")],
-            [InlineKeyboardButton("💬 Задать вопрос по фото", callback_data="ask_about_photo")],
+            # 'ask_about_photo' removed: users should include questions with the photo
             [InlineKeyboardButton("⬅️ Главная", callback_data="back_to_main")]
         ]
         return InlineKeyboardMarkup(keyboard)

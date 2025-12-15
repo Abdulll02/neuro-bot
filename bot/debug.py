@@ -10,7 +10,20 @@
 #     print("----")
 
 
-import requests
-r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
-                 params={"key": "AIzaSyBsWctTXrQ6HR6G8HI4_ysWNy6UjGcB_7I"}, timeout=10)
-print(r.status_code, r.text)
+# import requests
+# r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
+#                  params={"key": "AIzaSyBsWctTXrQ6HR6G8HI4_ysWNy6UjGcB_7I"}, timeout=10)
+# print(r.status_code, r.text)
+
+
+import google.generativeai as genai
+
+# Настройка API-ключа
+genai.configure(api_key="AIzaSyBsWctTXrQ6HR6G8HI4_ysWNy6UjGcB_7I")  
+
+# Создание модели
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+# Генерация текста
+response = model.generate_content("Привет, проверка связи")
+print(response.text)

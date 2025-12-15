@@ -10,6 +10,16 @@ class GeminiAI:
         self.candidates = []
         self.model = None
         try:
+            # Сначала попробуем закреплённую в конфиге модель, если она задана
+            try:
+                preferred = getattr(Config, 'GEMINI_MODEL', None)
+                if preferred:
+                    self.model = genai.GenerativeModel(preferred)
+                    return
+            except Exception:
+                # не удалось инициализировать предпочитаемую модель — продолжим автоматический выбор
+                self.model = None
+
             models = genai.list_models()
             # models может быть списком dict либо объектов; нормализуем
             norm = []
@@ -26,10 +36,15 @@ class GeminiAI:
                     norm.append(short)
 
             # Приоритет предпочтительных моделей
-            priority = [
+            # Добавим в приоритет модель из конфига (если она указана), затем прочие
+            priority = []
+            cfg_model = getattr(Config, 'GEMINI_MODEL', None)
+            if cfg_model:
+                priority.append(cfg_model.split('/')[-1])
+            priority.extend([
                 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-flash-latest', 'gemini-pro-latest',
                 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemma-3-12b-it', 'text-bison-001'
-            ]
+            ])
 
             # Выбираем первую модель из priority, которая есть в norm; иначе берём первую из norm
             chosen = None
@@ -93,8 +108,19 @@ class GeminiAI:
                 except Exception as e:
                     last_exc = e
                     response = None
-                    # Пытаемся подобрать другую модель из списка кандидатов
-                    for mname in self.candidates:
+                    # На ошибку квоты добавляем запасные модели в список для попытки
+                    err_text = str(e)
+                    candidates_to_try = list(self.candidates)
+                    if 'quota' in err_text.lower() or '429' in err_text:
+                        fallback_models = [
+                            'models/gemini-flash-lite-latest',
+                            'models/gemini-2.5-flash-lite',
+                            'models/gemma-3-1b-it',
+                            'models/nano-banana-pro-preview'
+                        ]
+                        candidates_to_try = fallback_models + candidates_to_try
+                    
+                    for mname in candidates_to_try:
                         try:
                             candidate = genai.GenerativeModel(mname)
                             response = self._try_generate_with_model(candidate, prompt)
@@ -112,7 +138,19 @@ class GeminiAI:
                 except Exception as e:
                     last_exc = e
                     response = None
-                    for mname in self.candidates:
+                    # На ошибку квоты добавляем запасные модели в список для попытки
+                    err_text = str(e)
+                    candidates_to_try = list(self.candidates)
+                    if 'quota' in err_text.lower() or '429' in err_text:
+                        fallback_models = [
+                            'models/gemini-flash-lite-latest',
+                            'models/gemini-2.5-flash-lite',
+                            'models/gemma-3-1b-it',
+                            'models/nano-banana-pro-preview'
+                        ]
+                        candidates_to_try = fallback_models + candidates_to_try
+                    
+                    for mname in candidates_to_try:
                         try:
                             candidate = genai.GenerativeModel(mname)
                             response = self._try_generate_with_model(candidate, message)
@@ -129,20 +167,48 @@ class GeminiAI:
             return f"Ошибка ИИ: {str(e)}"
     
     def analyze_image(self, image_bytes, prompt=None):
-        """Анализ изображения"""
+        """Анализ изображения
+
+        Попытка отправить изображение текущей модели; при ошибках квот
+        пытаемся последовательно использовать запасные модели.
+        """
         try:
-            # Открываем изображение
             image = Image.open(io.BytesIO(image_bytes))
-            
-            # Если пользователь не указал промпт, используем стандартный
+
             if not prompt:
-                prompt = """Проанализируй это изображение. Если это рукописный текст - перепиши его в печатном виде. 
-                          Если это математический пример или задача - реши её и объясни решение.
-                          Если это что-то еще - опиши что видишь и дай рекомендации."""
-            
-            # Отправляем изображение и промпт в Gemini
-            response = self.model.generate_content([prompt, image])
-            return response.text
+                prompt = (
+                    "Проанализируй это изображение. Если это рукописный текст - перепиши его в печатном виде. "
+                    "Если это математический пример или задача - реши её и объясни решение. "
+                    "Если это что-то еще - опиши что видишь и дай рекомендации."
+                )
+
+            # Основная попытка
+            try:
+                response = self.model.generate_content([prompt, image])
+                return response.text
+            except Exception as e:
+                err_text = str(e)
+                # На квотные/429 ошибки реагируем попыткой запасных моделей
+                if 'quota' in err_text.lower() or 'quota exceeded' in err_text.lower() or '429' in err_text:
+                    fallback_models = [
+                        'models/gemini-flash-lite-latest',
+                        'models/gemini-2.5-flash-image-preview',
+                        'models/gemma-3-1b-it',
+                        'models/nano-banana-pro-preview'
+                    ]
+                    last_exc = e
+                    for fm in fallback_models:
+                        try:
+                            candidate = genai.GenerativeModel(fm)
+                            resp = candidate.generate_content([prompt, image])
+                            self.model = candidate
+                            return resp.text
+                        except Exception as e2:
+                            last_exc = e2
+                            continue
+                    return f"Ошибка анализа изображения: {err_text} (запасные модели не помогли: {str(last_exc)})"
+                # Иные ошибки — возвращаем сообщение об ошибке
+                return f"Ошибка анализа изображения: {err_text}"
         except Exception as e:
             return f"Ошибка анализа изображения: {str(e)}"
     

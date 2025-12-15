@@ -1,6 +1,9 @@
 import logging
 import os
 from datetime import datetime
+import traceback
+import json
+import google.generativeai as genai
 from telegram import Update, InputFile
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -37,8 +40,9 @@ async def safe_edit_message(query, text, **kwargs):
     try:
         return await query.edit_message_text(text, **kwargs)
     except BadRequest as e:
-        # Ошибка возникает, если у сообщения нет текстового содержимого
+        # Обрабатываем ошибки редактирования — в том числе parse-entity ошибки
         msg = str(e)
+        # Если проблема — отсутствие текстового содержимого для редактирования
         if "There is no text in the message to edit" in msg or "message to edit" in msg:
             # Если у сообщения есть подпись (caption), попробуем отредактировать подпись
             try:
@@ -49,7 +53,7 @@ async def safe_edit_message(query, text, **kwargs):
 
             # В противном случае отправляем новое сообщение и пробуем убрать клавиатуру у старого
             try:
-                await query.message.reply_text(text, **kwargs)
+                await query.message.reply_text(text, **{k: v for k, v in kwargs.items() if k != 'parse_mode'})
             except Exception:
                 # как последний инструмент — ответ на callback
                 await query.answer(text)
@@ -58,8 +62,35 @@ async def safe_edit_message(query, text, **kwargs):
             except Exception:
                 pass
             return None
-        else:
-            raise
+        # Если проблема — парсинг entities (незакрытые/несоответствующие отступы в Markdown)
+        if "can't find end of the entity" in msg or "Can't parse entities" in msg or "can't find end of the entity" in msg.lower():
+            # Попытка повторить без parse_mode
+            try:
+                return await query.edit_message_text(text, **{k: v for k, v in kwargs.items() if k != 'parse_mode'})
+            except Exception:
+                try:
+                    await query.message.reply_text(text)
+                except Exception:
+                    await query.answer(text)
+                return None
+
+        # Прочие ошибки пробрасываем
+        raise
+
+
+async def safe_reply(message_obj, text, parse_mode='Markdown', **kwargs):
+    """Безопасная отправка текста: пытается с указанным parse_mode, при ошибке парсинга entities повторяет без parse_mode."""
+    try:
+        return await message_obj.reply_text(text, parse_mode=parse_mode, **kwargs)
+    except BadRequest as e:
+        err = str(e)
+        if "can't find end of the entity" in err or "Can't parse entities" in err or "can't find end of the entity" in err.lower():
+            # Повтор без parse_mode
+            try:
+                return await message_obj.reply_text(text, **{k: v for k, v in kwargs.items() if k != 'parse_mode'})
+            except Exception:
+                return await message_obj.reply_text(text)
+        raise
 
 # Инициализация сервисов
 tts_service = YandexTTS()
@@ -132,6 +163,16 @@ async def handle_mode_selection(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     
     user_id = query.from_user.id
+    # Ensure user data exists (avoid KeyError if /start wasn't called)
+    if user_id not in user_data:
+        user_data[user_id] = {
+            'mode': 'chat',
+            'voice': 'alena',
+            'speed': 1.0,
+            'chat_history': [],
+            'last_tts_text': '',
+            'last_photo_analysis': ''
+        }
     mode = query.data.replace("mode_", "")
     
     user_data[user_id]['mode'] = mode
@@ -253,21 +294,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await update.message.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
         
-        # Анализируем фото через Gemini
-        analysis_result = ai_service.analyze_image(photo_bytes)
+        # Если у фото есть подпись — используем её как пользовательский запрос/промпт
+        caption = update.message.caption if getattr(update.message, 'caption', None) else None
+        # Анализируем фото через Gemini, передавая подпись как prompt (если есть)
+        analysis_result = ai_service.analyze_image(photo_bytes, prompt=caption)
         
         # Сохраняем результат
         user_data[user_id]['last_photo_analysis'] = analysis_result
         
         # Разбиваем длинный текст если нужно
         message_parts = split_long_message(analysis_result)
-        
-        # Отправляем первую часть с клавиатурой
-        await update.message.reply_text(
-            f"📷 *Результат анализа:*\n\n{message_parts[0]}",
-            parse_mode='Markdown',
-            reply_markup=Keyboards.get_photo_actions()
-        )
+
+        # Отправляем первую часть с клавиатурой, используя safe_reply
+        await safe_reply(update.message, f"📷 *Результат анализа:*\n\n{message_parts[0]}", parse_mode='Markdown', reply_markup=Keyboards.get_photo_actions())
         
         # Отправляем остальные части если есть
         for part in message_parts[1:]:
@@ -323,12 +362,15 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         if len(user_data[user_id]['chat_history']) > 20:
             user_data[user_id]['chat_history'] = user_data[user_id]['chat_history'][-10:]
         
-        # Отправляем ответ
-        await update.message.reply_text(
-            f"🤖 *ИИ:*\n\n{response}",
-            parse_mode='Markdown',
-            reply_markup=Keyboards.get_chat_actions()
-        )
+        # Разбиваем длинный ответ если нужно (Telegram лимит ~4096 символов)
+        message_parts = split_long_message(response)
+        
+        # Отправляем первую часть с клавиатурой
+        await safe_reply(update.message, f"🤖 *ИИ:*\n\n{message_parts[0]}", parse_mode='Markdown', reply_markup=Keyboards.get_chat_actions())
+        
+        # Отправляем остальные части если есть
+        for part in message_parts[1:]:
+            await update.message.reply_text(part)
         
         # Удаляем статус
         await status_msg.delete()
@@ -404,46 +446,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Неизвестный сабкомандный суффикс (например 'up' или 'down') — логируем и игнорируем
             logger.warning(f"Unhandled speed action: {action}")
     
-    elif action == "repeat_tts":
-        # Повтор TTS
-        last_text = user_data[user_id].get('last_tts_text', '')
-        if last_text:
-            await safe_edit_message(query,
-                f"🔊 *Повторяю...*\n\n{last_text}",
-                parse_mode='Markdown'
-            )
-            
-            voice = user_data[user_id]['voice']
-            speed = user_data[user_id]['speed']
-            audio_data = tts_service.synthesize(last_text, voice=voice, speed=speed)
-            
-            with temp_audio_file(audio_data) as audio_path:
-                ogg_path = convert_mp3_to_ogg_opus(audio_path)
-                if ogg_path:
-                    try:
-                        with open(ogg_path, 'rb') as f_ogg:
-                            await query.message.reply_voice(
-                                voice=InputFile(f_ogg, filename='audio.ogg'),
-                                caption=f"🔁 Повтор\n\n{format_voice_info(voice, speed)}",
-                                reply_markup=Keyboards.get_tts_actions()
-                            )
-                    finally:
-                        try:
-                            os.unlink(ogg_path)
-                        except Exception:
-                            pass
-                else:
-                    with open(audio_path, 'rb') as f_mp3:
-                        await query.message.reply_audio(
-                            audio=InputFile(f_mp3, filename='audio.mp3'),
-                            caption=f"🔁 Повтор\n\n{format_voice_info(voice, speed)}",
-                            reply_markup=Keyboards.get_tts_actions()
-                        )
-        else:
-            await safe_edit_message(query,
-                "❌ Нет текста для повторения.",
-                reply_markup=Keyboards.get_main_menu()
-            )
+    # 'repeat_tts' handler removed — TTS repeat button was eliminated from UI.
     
     elif action == "slow_down":
         # Замедление
@@ -463,78 +466,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=Keyboards.get_tts_actions()
         )
     
-    elif action == "voice_response":
-        # Озвучка последнего ответа ИИ
-        if user_data[user_id].get('chat_history'):
-            last_response = user_data[user_id]['chat_history'][-1]['content']
-            
-            await safe_edit_message(query,
-                "🔊 *Озвучиваю ответ...*",
-                parse_mode='Markdown'
-            )
-            
-            voice = user_data[user_id]['voice']
-            speed = user_data[user_id]['speed']
-            audio_data = tts_service.synthesize(last_response[:500], voice=voice, speed=speed)
-            
-            with temp_audio_file(audio_data) as audio_path:
-                ogg_path = convert_mp3_to_ogg_opus(audio_path)
-                if ogg_path:
-                    try:
-                        with open(ogg_path, 'rb') as f_ogg:
-                            await query.message.reply_voice(
-                                voice=InputFile(f_ogg, filename='audio.ogg'),
-                                caption="🎤 Ответ ИИ в аудиоформате",
-                                reply_markup=Keyboards.get_chat_actions()
-                            )
-                    finally:
-                        try:
-                            os.unlink(ogg_path)
-                        except Exception:
-                            pass
-                else:
-                    with open(audio_path, 'rb') as f_mp3:
-                        await query.message.reply_audio(
-                            audio=InputFile(f_mp3, filename='audio.mp3'),
-                            caption="🎤 Ответ ИИ в аудиоформате",
-                            reply_markup=Keyboards.get_chat_actions()
-                        )
+    # note: 'voice_response' handler intentionally removed — TTS-on-demand button caused bugs and
+    # was outside the original spec. If future TTS-on-demand is required, reintroduce here with
+    # proper safeguards and rate/size checks.
     
-    elif action == "voice_photo_result":
-        # Озвучка результата анализа фото
-        last_analysis = user_data[user_id].get('last_photo_analysis', '')
-        if last_analysis:
-            await safe_edit_message(query,
-                "🔊 *Озвучиваю результат...*",
-                parse_mode='Markdown'
-            )
-            
-            voice = user_data[user_id]['voice']
-            speed = user_data[user_id]['speed']
-            audio_data = tts_service.synthesize(last_analysis[:500], voice=voice, speed=speed)
-            
-            with temp_audio_file(audio_data) as audio_path:
-                ogg_path = convert_mp3_to_ogg_opus(audio_path)
-                if ogg_path:
-                    try:
-                        with open(ogg_path, 'rb') as f_ogg:
-                            await query.message.reply_voice(
-                                voice=InputFile(f_ogg, filename='audio.ogg'),
-                                caption="🎤 Результат анализа в аудиоформате",
-                                reply_markup=Keyboards.get_photo_actions()
-                            )
-                    finally:
-                        try:
-                            os.unlink(ogg_path)
-                        except Exception:
-                            pass
-                else:
-                    with open(audio_path, 'rb') as f_mp3:
-                        await query.message.reply_audio(
-                            audio=InputFile(f_mp3, filename='audio.mp3'),
-                            caption="🎤 Результат анализа в аудиоформате",
-                            reply_markup=Keyboards.get_photo_actions()
-                        )
+    # note: 'voice_photo_result' handler removed — TTS-on-photo-result button caused bugs and
+    # was outside the requested spec. If needed later, reintroduce with proper safeguards.
     
     elif action == "set_voice":
         await safe_edit_message(query,
@@ -564,6 +501,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=Keyboards.get_cancel_button()
         )
+        try:
+            await query.answer(text="Отправьте новое фото")
+        except Exception:
+            pass
         return WAITING_PHOTO
     
     elif action == "continue_chat":
@@ -596,6 +537,8 @@ def main():
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    # Global photo handler: accept photos even if conversation state wasn't set
+    application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_photo))
     
     # Conversation Handler для режимов
     conv_handler = ConversationHandler(
@@ -634,3 +577,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
