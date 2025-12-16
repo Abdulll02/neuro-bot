@@ -14,6 +14,7 @@ class Keyboards:
             [InlineKeyboardButton("💬 Чат с ИИ", callback_data="mode_chat")],
             [InlineKeyboardButton("🎤 Текст в голос", callback_data="mode_tts")],
             [InlineKeyboardButton("📷 Анализ фото", callback_data="mode_photo")],
+            [InlineKeyboardButton("📄 Работа с файлами", callback_data="mode_file")],
             [InlineKeyboardButton("🎧 Настройки озвучки", callback_data="mode_settings")]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -91,3 +92,12 @@ class Keyboards:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
         ])
+    
+    @staticmethod
+    def get_file_actions():
+        """Действия после анализа файла"""
+        keyboard = [
+            [InlineKeyboardButton("📄 Новый файл", callback_data="new_file")],
+            [InlineKeyboardButton("⬅️ Главная", callback_data="back_to_main")]
+        ]
+        return InlineKeyboardMarkup(keyboard)

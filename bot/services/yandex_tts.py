@@ -9,8 +9,20 @@ class YandexTTS:
         self.folder_id = Config.YANDEX_FOLDER_ID
         self.url = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
     
+    def _get_supported_emotion(self, voice, emotion):
+        """Возвращает поддерживаемую эмоцию для голоса; если текущая не поддерживается — возвращает дефолт"""
+        supported = Config.VOICE_EMOTIONS.get(voice, ["good"])
+        if emotion in supported:
+            return emotion
+        # Если эмоция не поддерживается, используем дефолт для этого голоса
+        default = Config.VOICE_DEFAULT_EMOTION.get(voice, "good")
+        return default
+    
     def synthesize(self, text, voice="alena", speed=1.0, emotion="good"):
         """Синтезирует речь из текста"""
+        
+        # Убедимся, что эмоция поддерживается для этого голоса
+        emotion = self._get_supported_emotion(voice, emotion)
         
         headers = {
             "Authorization": f"Api-Key {self.api_key}"

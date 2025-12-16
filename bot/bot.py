@@ -22,7 +22,7 @@ from services.yandex_tts import YandexTTS
 from services.gemini_ai import GeminiAI
 from keyboards import Keyboards
 from utils import temp_audio_file, split_long_message, format_voice_info, convert_mp3_to_ogg_opus
-from states import WAITING_TEXT, WAITING_PHOTO, WAITING_CHAT, WAITING_QUESTION
+from states import WAITING_TEXT, WAITING_PHOTO, WAITING_CHAT, WAITING_QUESTION, WAITING_FILE
 
 # Настройка логирования
 logging.basicConfig(
@@ -121,6 +121,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 💬 *Общаться как ИИ-ассистент* - отвечаю на вопросы, даю советы
 • 🎤 *Преобразовывать текст в речь* - с разными голосами и скоростью
 • 📷 *Анализировать фотографии* - читаю рукописный текст, решаю примеры
+• 📄  *Работать с файлами* - анализирую и конспектирую текстовые документы
+
+*Подсказка:* Используй команду /help для получения справки
 
 Выберите режим работы:"""
     
@@ -137,7 +140,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *Основные возможности:*
 1. *💬 Чат с ИИ* - просто отправьте текстовое сообщение
 2. *🎤 Текст в голос* - выберите режим и введите текст для озвучки
-3. *📷 Анализ фото* - отправьте фото с текстом или примером
+3. *📷 Анализ фото* - отправьте фото с текстом или примером (Можете добавить запрос подписав фото)
+4. *📄 Работа с файлами* - отправьте текстовый файл с запросом для анализа и действий (*Поддерживает только TXT, DOCX, PDF*)
 
 *Управление:*
 • Используйте кнопки для навигации
@@ -205,6 +209,15 @@ async def handle_mode_selection(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=Keyboards.get_cancel_button()
         )
         return WAITING_PHOTO
+        
+    elif mode == "file":
+        await safe_edit_message(query,
+            "📄 *Режим: Работа с файлами*\n\nОтправьте файл (PDF, TXT, DOCX) с опциональной подписью-запросом.\n"
+            "Я проанализирую содержимое файла.",
+            parse_mode='Markdown',
+            reply_markup=Keyboards.get_cancel_button()
+        )
+        return WAITING_FILE
         
     elif mode == "settings":
         await safe_edit_message(query,
@@ -319,6 +332,66 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Photo analysis error: {e}")
         await update.message.reply_text(
             f"❌ Ошибка анализа фото: {str(e)}",
+            reply_markup=Keyboards.get_main_menu()
+        )
+    
+    return ConversationHandler.END
+
+# ========== ОБРАБОТКА ФАЙЛОВ ==========
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка документов (PDF, TXT, DOCX и т.д.)"""
+    user_id = update.effective_user.id
+    
+    # Инициализация данных пользователя если нужно
+    if user_id not in user_data:
+        user_data[user_id] = {
+            'mode': 'chat',
+            'voice': 'alena',
+            'speed': 1.0,
+            'chat_history': [],
+            'last_tts_text': '',
+            'last_photo_analysis': ''
+        }
+    
+    # Показываем статус
+    status_msg = await update.message.reply_text(
+        "📄 *Анализирую файл...*",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Получаем документ
+        document_file = await update.message.document.get_file()
+        file_bytes = await document_file.download_as_bytearray()
+        file_name = update.message.document.file_name or "document"
+        
+        # Если у файла есть подпись — используем её как промпт
+        caption = update.message.caption if getattr(update.message, 'caption', None) else None
+        
+        # Анализируем файл через Gemini (использует Files API)
+        analysis_result = ai_service.analyze_document(file_bytes, file_name, prompt=caption)
+        
+        # Сохраняем результат
+        user_data[user_id]['last_file_analysis'] = analysis_result
+        
+        # Разбиваем длинный текст если нужно
+        message_parts = split_long_message(analysis_result)
+        
+        # Отправляем первую часть с клавиатурой
+        await safe_reply(update.message, f"📄 *Результат анализа:*\n\n{message_parts[0]}", parse_mode='Markdown', reply_markup=Keyboards.get_file_actions())
+        
+        # Отправляем остальные части если есть
+        for part in message_parts[1:]:
+            await update.message.reply_text(part)
+        
+        # Удаляем статус
+        await status_msg.delete()
+        
+    except Exception as e:
+        logger.error(f"Document analysis error: {e}")
+        await update.message.reply_text(
+            f"❌ Ошибка анализа файла: {str(e)}",
             reply_markup=Keyboards.get_main_menu()
         )
     
@@ -507,6 +580,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return WAITING_PHOTO
     
+    elif action == "new_file":
+        await safe_edit_message(query,
+            "📄 *Режим: Работа с файлами*\n\nОтправьте новый файл для анализа.",
+            parse_mode='Markdown',
+            reply_markup=Keyboards.get_cancel_button()
+        )
+        try:
+            await query.answer(text="Отправьте новый файл")
+        except Exception:
+            pass
+        return WAITING_FILE
+    
     elif action == "continue_chat":
         await safe_edit_message(query,
             "💬 *Режим: Чат с ИИ*\n\nПродолжайте диалог.",
@@ -539,6 +624,8 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     # Global photo handler: accept photos even if conversation state wasn't set
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_photo))
+    # Global document handler: accept documents even if conversation state wasn't set
+    application.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, handle_document))
     
     # Conversation Handler для режимов
     conv_handler = ConversationHandler(
@@ -552,6 +639,10 @@ def main():
             ],
             WAITING_PHOTO: [
                 MessageHandler(filters.PHOTO, handle_photo),
+                CallbackQueryHandler(handle_callback, pattern="^cancel$")
+            ],
+            WAITING_FILE: [
+                MessageHandler(filters.Document.ALL, handle_document),
                 CallbackQueryHandler(handle_callback, pattern="^cancel$")
             ],
             WAITING_CHAT: [

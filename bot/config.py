@@ -25,6 +25,25 @@ class Config:
         "zahar": "Захар (мужской)"
     }
     
+    # Поддерживаемые эмоции для каждого голоса
+    # Некоторые голоса поддерживают только определённые эмоции
+    VOICE_EMOTIONS = {
+        "alena": ["good", "evil", "neutral"],
+        "filipp": ["good"],
+        "jane": ["good", "evil"],
+        "omazh": ["evil", "neutral"],  # omazh НЕ поддерживает 'good'
+        "zahar": ["good", "evil", "neutral"]
+    }
+    
+    # Дефолтная эмоция для каждого голоса
+    VOICE_DEFAULT_EMOTION = {
+        "alena": "good",
+        "filipp": "good",
+        "jane": "good",
+        "omazh": "evil",  # Дефолт для omazh — evil
+        "zahar": "good"
+    }
+    
     # Настройки скорости
     SPEEDS = {
         "very_slow": ("Очень медленно", 0.5),

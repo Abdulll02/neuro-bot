@@ -2,3 +2,13 @@
 /venv
 .env
 /.env
+/.pyc
+.pyc
+/__pycache__
+__pycache__
+bot/__pycache__/bot.cpython-313.pyc
+bot/__pycache__/states.cpython-311.pyc
+bot/__pycache__/states.cpython-311.pyc
+bot/services/__pycache__/gemini_ai.cpython-311.pyc
+bot/services/__pycache__/gemini_ai.cpython-313.pyc
+bot/services/__pycache__/yandex_tts.cpython-313.pyc
