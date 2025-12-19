@@ -19,7 +19,7 @@ from telegram.error import TelegramError
 
 from config import Config
 from services.yandex_tts import YandexTTS
-from services.gemini_ai import GeminiAI
+from services.yandex_ai import GeminiAI
 from keyboards import Keyboards
 from utils import temp_audio_file, split_long_message, format_voice_info, convert_mp3_to_ogg_opus
 from states import WAITING_TEXT, WAITING_PHOTO, WAITING_CHAT, WAITING_QUESTION, WAITING_FILE
@@ -60,7 +60,7 @@ async def safe_edit_message(query, text, **kwargs):
             try:
                 await query.message.edit_reply_markup(reply_markup=None)
             except Exception:
-                pass
+                pass    
             return None
         # Если проблема — парсинг entities (незакрытые/несоответствующие отступы в Markdown)
         if "can't find end of the entity" in msg or "Can't parse entities" in msg or "can't find end of the entity" in msg.lower():

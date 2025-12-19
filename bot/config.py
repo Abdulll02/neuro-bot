@@ -11,10 +11,12 @@ class Config:
     YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
     YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
     
-    # Gemini AI
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    # Зафиксированная модель Gemini (можно переопределить через переменные окружения)
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
+
+
+    # # Gemini AI, эти настройки нам сейчас не нужны
+    # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    # # Зафиксированная модель Gemini (можно переопределить через переменные окружения)
+    # GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
     
     # Настройки голосов
     VOICES = {
@@ -52,3 +54,19 @@ class Config:
         "fast": ("Быстро", 1.3),
         "very_fast": ("Очень быстро", 1.8)
     }
+
+    #  Добавим список моделей Yandex для удобства и перебора
+    YANDEX_TEXT_MODELS = [
+        "yandexgpt", # Используем как Pro/Standard
+        "yandexgpt-lite"
+    ]
+    
+    # Для мультимодальности (изображения) и сложного анализа нужен Pro/Standard
+    YANDEX_MULTIMODAL_MODELS = [
+        "yandexgpt-standard",
+        "yandexgpt-pro",
+    ]
+
+    YANDEX_ANALYSIS_MODELS = [
+    "yandexgpt"
+    ]

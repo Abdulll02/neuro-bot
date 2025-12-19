@@ -10,7 +10,9 @@ TEXT_PRIORITY = [
     'gemini-pro-latest',
     'gemini-2.5-flash-lite',
     'gemini-2.0-flash',
-    'gemma-3-12b-it',
+    'gemma-3-12b',
+    'gemini-3-flash',
+    'gemma-3-27b',
     'text-bison-001'
 ]
 
@@ -139,7 +141,12 @@ class GeminiAI:
                         fallback_models = [
                             'models/gemini-flash-lite-latest',
                             'models/gemini-2.5-flash-lite',
-                            'models/gemma-3-1b-it',
+                            'models/gemini-3-flash',
+                            'models/gemma-3-1b',
+                            'models/gemma-3-27b',
+                            'models/gemma-3-12b',
+                            'models/gemma-3-2b',
+                            'models/gemma-3-4b',
                         ]
                         candidates_to_try = fallback_models + candidates_to_try
                     for mname in candidates_to_try:
@@ -168,7 +175,11 @@ class GeminiAI:
                             'models/gemini-2.5-flash-lite',
                             'models/gemini-flash-lite-latest',
                             'models/gemini-2.5-flash-lite',
-                            'models/gemma-3-1b-it',
+                            'models/gemma-3-12b',
+                            'models/gemma-3-27b',
+                            'models/gemma-3-1b',
+                            'models/gemma-3-4b',
+                            'models/gemma-3-2b'
                         ]
                         candidates_to_try = fallback_models + candidates_to_try
                     for mname in candidates_to_try:
@@ -209,6 +220,12 @@ class GeminiAI:
                         'models/gemini-2.5-flash-lite',
                         'models/gemini-flash-lite-latest',
                         'models/gemini-2.5-flash-image-preview',
+                        'models/gemma-3-12b',
+                        'mdoels/gemini-3-flash',
+                        'models/gemma-3-27b',
+                        'models/gemma-3-4b',
+                        'models/gemma-3-2b',
+                        'models/gemma-3-1b',
                         'models/nano-banana-pro-preview',
                     ]
                     last_exc = e
@@ -376,7 +393,12 @@ class GeminiAI:
                         'models/gemini-2.5-flash-lite',
                         'models/gemini-flash-lite-latest',
                         'models/gemini-2.5-flash-image-preview',
-                        'models/gemma-3-1b-it',
+                        'models/gemma-3-12b',
+                        'mdoels/gemini-3-flash',
+                        'models/gemma-3-27b',
+                        'models/gemma-3-4b',
+                        'models/gemma-3-1b',
+                        'models/gemma-3-2b',
                         'models/nano-banana-pro-preview'
                     ]
                     uploaded_file_fallback = None
